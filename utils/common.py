@@ -391,12 +391,34 @@ def xs_get_stats(stat_file: str, targets: list,
     return stats
 
 
-def gem5_get_stats(stat_file: str, targets: list,
+def prepare_targets_for_multi_cores(targets: dict, num_cores: int) -> dict:
+    if num_cores == 1:
+        return targets
+
+    new_targets = {}
+
+    for key, value in targets.items():
+        # Check if the key contains "l1" or "l2"
+        if re.search(r'l1|l2', key) or re.search(r'l1|l2|cpu', value):
+            for core in range(num_cores):
+                # Create new key and value with appended core number
+                new_key = key + f'_{core}'
+                new_value = re.sub(r'l1|l2|cpu', lambda x: x.group() + str(core), value)
+                new_targets[new_key] = new_value
+        else:
+            new_targets[key] = value
+
+    return new_targets
+
+
+def gem5_get_stats(stat_file: str, targets: list, num_cores: int,
               insts: int=100*(10**6), re_targets=False,
               all_chunks=False, config_file=None, insts_from_dir=False) -> dict:
     if not os.path.isfile(expu(stat_file)):
         print(stat_file)
     assert(os.path.isfile(expu(stat_file)))
+
+    targets = prepare_targets_for_multi_cores(targets, num_cores)
 
     patterns = {}
 
@@ -548,23 +570,35 @@ def xs_add_branch_mispred(d: dict) -> None:
     # d['return MPKI'] = float(d['RASIncorrect']) / float(d['Insts']) * 1000
 
 def add_cache_mpki(d: dict) -> None:
-    d['L1D.MPKI'] = float(d.get('dcache_miss', 0.0)) / float(d['Insts']) * 1000
+    if d['num_cores'] == 1:
+        cores = ['']
+    else:
+        cores = list(range(d['num_cores']))
+        cores = [f'_{c}' for c in cores]
 
-    d['L2.MPKI'] = float(d.get('l2_miss', 0.0)) / float(d['Insts']) * 1000
-    d['L2.NonPref.Miss'] = float(d.get('l2_miss', 0.0) - d.get('l2_miss_l1d_pref', 0.0))
-    d['L2.NonPref.MPKI'] = d['L2.NonPref.Miss'] / float(d['Insts']) * 1000
+    pft_acc_sum = 0
+    pft_miss_sum = 0
+    insts = 0
+    for c in cores:
+        d[f'L1D.MPKI{c}'] = float(d.get(f'dcache_miss{c}', 0.0)) / float(d[f'Insts{c}']) * 1000
+        d[f'L2.MPKI{c}'] = float(d.get(f'l2_miss{c}', 0.0)) / float(d[f'Insts{c}']) * 1000
+        d[f'L2.NonPref.Miss{c}'] = float(d.get(f'l2_miss{c}', 0.0) - d.get(f'l2_miss_l1d_pref{c}', 0.0))
+        d[f'L2.NonPref.MPKI{c}'] = d[f'L2.NonPref.Miss{c}'] / float(d[f'Insts{c}']) * 1000
 
-    
-    d['L3.NonPrefAcc'] = float(d.get('l3_acc', 0.0) - d.get('l3_acc_l2_pref', 0.0))
-    d['L3.NonPrefMiss'] = float(d.get('l3_acc', 0.0) \
-            - d.get('l3_miss_l2_pref', 0.0) - d.get('l3_miss_l1d_pref', 0.0) )
+        pft_acc_sum += float(d.get(f'l3_acc_l2_pref{c}', 0.0))
+        pft_miss_sum += float(d.get(f'l3_miss_l2_pref{c}', 0.0) + d.get(f'l3_miss_l1d_pref{c}', 0.0))
+
+        insts += d[f'Insts{c}']
+
+    d['L3.NonPrefAcc'] = float(d.get('l3_acc', 0.0) - pft_acc_sum)
+    d['L3.NonPrefMiss'] = float(d.get('l3_miss', 0.0) - pft_miss_sum)
 
     d.pop('l2_acc_l1d_pref', None)
     d.pop('l3_miss_l1d_pref', None)
     d.pop('l3_acc_l2_pref', None)
     d.pop('l3_miss_l2_pref', None)
 
-    d['L3.NonPref.MPKI'] = float(d.get('L3.NonPrefMiss', 0.0)) / float(d['Insts']) * 1000
+    d['L3.NonPref.MPKI'] = float(d.get('L3.NonPrefMiss', 0.0)) / float(insts) * 1000
 
 
 def xs_add_cache_mpki(d: dict) -> None:

@@ -176,7 +176,7 @@ def main():
             if xs_stat_fmt:
                 d = c.xs_get_stats(path, xs_ipc_target, re_targets=True)
             else:
-                d = c.gem5_get_stats(path, ipc_target, re_targets=True)
+                d = c.gem5_get_stats(path, ipc_target, opt.num_cores, re_targets=True)
         else:
             if xs_stat_fmt:
                 targets = xs_ipc_target
@@ -209,9 +209,12 @@ def main():
 
                 add_eval_targets(opt, targets)
 
-                d = c.gem5_get_stats(path, targets, re_targets=True)
+                d = c.gem5_get_stats(path, targets, opt.num_cores, re_targets=True)
 
             # TODO: test eval stats
+
+        d['num_cores'] = opt.num_cores
+
         if len(d):
             if opt.branch:
                 eval(f"c.{prefix}add_branch_mispred(d)")
